@@ -30,6 +30,8 @@ func (m *Model) View() string {
 		return m.viewNameNew()
 	case modePreview:
 		return m.viewPreview()
+	case modeRename:
+		return m.viewRename()
 	default:
 		return m.viewList()
 	}
@@ -117,7 +119,31 @@ func (m *Model) viewSessions() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("↑/↓ select   ⏎ attach   p preview   n new   esc back   q quit"))
+	b.WriteString(helpStyle.Render("↑/↓ select   ⏎ attach   p preview   n new   R rename   esc back   q quit"))
+	return b.String()
+}
+
+func (m *Model) viewRename() string {
+	var b strings.Builder
+	b.WriteString(titleStyle.Render("soda"))
+	b.WriteString("\n\n")
+	b.WriteString(fmt.Sprintf("Rename session on %s\n\n", selectedRow.Render(m.selected)))
+	b.WriteString(mutedStyle.Render("from: "))
+	b.WriteString(m.renameTarget)
+	b.WriteString("\n")
+	b.WriteString(mutedStyle.Render("to:   "))
+	b.WriteString(selectedRow.Render(m.renameInput))
+	if !m.renameInFlight {
+		b.WriteString(cursorStyle.Render("▏"))
+	} else {
+		b.WriteString(mutedStyle.Render("  (renaming…)"))
+	}
+	if m.status != "" {
+		b.WriteString("\n\n")
+		b.WriteString(statusStyle.Render(m.status))
+	}
+	b.WriteString("\n\n")
+	b.WriteString(helpStyle.Render("⏎ rename   esc cancel   ctrl+u clear"))
 	return b.String()
 }
 

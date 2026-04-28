@@ -16,6 +16,13 @@ type previewMsg struct {
 	err     error
 }
 
+type renameMsg struct {
+	host    string
+	oldName string
+	newName string
+	err     error
+}
+
 // Update is the bubbletea reducer.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -44,6 +51,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.previewErr = msg.err
 		return m, nil
 
+	case renameMsg:
+		m.renameInFlight = false
+		if msg.err != nil {
+			m.status = "rename failed: " + msg.err.Error()
+			return m, nil
+		}
+		m.status = "renamed " + msg.oldName + " → " + msg.newName
+		m.mode = modeSessions
+		m.renameTarget = ""
+		m.renameInput = ""
+		// Refresh so the new name shows up in the session list.
+		return m, m.startScan()
+
 	case tea.KeyMsg:
 		switch m.mode {
 		case modeList:
@@ -54,6 +74,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateNameNew(msg)
 		case modePreview:
 			return m.updatePreview(msg)
+		case modeRename:
+			return m.updateRename(msg)
 		}
 	}
 	return m, nil
@@ -133,8 +155,72 @@ func (m *Model) updateSessions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "p":
 		s := r.Sessions[m.sessionCur]
 		return m.startPreview(m.selected, s.Name)
+	case "R":
+		s := r.Sessions[m.sessionCur]
+		m.renameTarget = s.Name
+		m.renameInput = s.Name
+		m.renameInFlight = false
+		m.mode = modeRename
 	}
 	return m, nil
+}
+
+func (m *Model) updateRename(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.renameInFlight {
+		// Ignore key input while the ssh call is mid-flight; only ctrl+c quits.
+		if msg.String() == "ctrl+c" {
+			m.cancel()
+			return m, tea.Quit
+		}
+		return m, nil
+	}
+	switch msg.String() {
+	case "ctrl+c":
+		m.cancel()
+		return m, tea.Quit
+	case "esc":
+		m.mode = modeSessions
+		m.renameTarget = ""
+		m.renameInput = ""
+	case "enter":
+		newName := strings.TrimSpace(m.renameInput)
+		if newName == "" {
+			m.status = "session name cannot be empty"
+			return m, nil
+		}
+		if newName == m.renameTarget {
+			// No-op rename — just go back.
+			m.mode = modeSessions
+			m.renameTarget = ""
+			m.renameInput = ""
+			return m, nil
+		}
+		m.renameInFlight = true
+		return m, renameCmd(m.selected, m.renameTarget, newName)
+	case "backspace":
+		if n := len(m.renameInput); n > 0 {
+			m.renameInput = m.renameInput[:n-1]
+		}
+	case "ctrl+u":
+		m.renameInput = ""
+	default:
+		if len(msg.Runes) == 1 {
+			r := msg.Runes[0]
+			if r >= 0x20 && r != 0x7f && r != ':' && r != '.' {
+				m.renameInput += string(r)
+			}
+		}
+	}
+	return m, nil
+}
+
+func renameCmd(host, oldName, newName string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		err := scanner.RenameSession(ctx, host, oldName, newName)
+		return renameMsg{host: host, oldName: oldName, newName: newName, err: err}
+	}
 }
 
 // startPreview transitions to modePreview and kicks off a tmux capture-pane

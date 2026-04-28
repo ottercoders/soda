@@ -164,34 +164,52 @@ func Scan(ctx context.Context, hs []hosts.Host, runner Runner, concurrency int) 
 	return out
 }
 
-// Preview captures the visible content of the current pane in the named tmux
-// session on the given host using `tmux capture-pane -p`. It uses the same
-// ssh options as a scan (BatchMode + short ConnectTimeout) so a flaky host
-// can't hang the TUI.
-func Preview(ctx context.Context, alias, session string) (string, error) {
-	if alias == "" || session == "" {
-		return "", errors.New("preview: empty alias or session")
-	}
-	remote := "tmux capture-pane -p -J -t " + shellQuote(session)
+// runOneShot runs a single remote command via ssh on the named host using the
+// same BatchMode + short-timeout flags the scanner uses. Used for control-plane
+// operations like preview, rename, kill — anything where we want to do one
+// thing on the remote and parse the result, not stream output.
+func runOneShot(ctx context.Context, alias, remoteCmd string) (stdout string, err error) {
 	args := []string{
 		"-o", "BatchMode=yes",
 		"-o", "ConnectTimeout=3",
 		"-o", "StrictHostKeyChecking=accept-new",
 		alias,
-		remote,
+		remoteCmd,
 	}
 	cmd := exec.CommandContext(ctx, "ssh", args...)
-	var stdout, stderr strings.Builder
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+	var so, se strings.Builder
+	cmd.Stdout = &so
+	cmd.Stderr = &se
+	if runErr := cmd.Run(); runErr != nil {
 		var ee *exec.ExitError
-		if errors.As(err, &ee) {
-			return "", fmt.Errorf("ssh exit %d: %s", ee.ExitCode(), strings.TrimSpace(stderr.String()))
+		if errors.As(runErr, &ee) {
+			return "", fmt.Errorf("ssh exit %d: %s", ee.ExitCode(), strings.TrimSpace(se.String()))
 		}
-		return "", err
+		return "", runErr
 	}
-	return stdout.String(), nil
+	return so.String(), nil
+}
+
+// Preview captures the visible content of the current pane in the named tmux
+// session on the given host using `tmux capture-pane -p`.
+func Preview(ctx context.Context, alias, session string) (string, error) {
+	if alias == "" || session == "" {
+		return "", errors.New("preview: empty alias or session")
+	}
+	return runOneShot(ctx, alias, "tmux capture-pane -p -J -t "+shellQuote(session))
+}
+
+// RenameSession renames a tmux session on the remote host.
+func RenameSession(ctx context.Context, alias, oldName, newName string) error {
+	if alias == "" || oldName == "" || newName == "" {
+		return errors.New("rename: empty alias/old/new")
+	}
+	if oldName == newName {
+		return nil
+	}
+	_, err := runOneShot(ctx, alias,
+		"tmux rename-session -t "+shellQuote(oldName)+" "+shellQuote(newName))
+	return err
 }
 
 func scanOne(ctx context.Context, h hosts.Host, runner Runner) Result {

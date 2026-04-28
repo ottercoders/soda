@@ -20,6 +20,7 @@ const (
 	modeSessions
 	modeNameNew // prompting for the name of a new tmux session
 	modePreview // showing `tmux capture-pane` output for a session
+	modeRename  // editing a new name for an existing session
 )
 
 // Action is what the user picked when the TUI exits.
@@ -61,6 +62,10 @@ type Model struct {
 	previewText    string // captured stdout (cleared while loading)
 	previewErr     error  // last preview error, if any
 	previewLoading bool
+
+	renameTarget   string // session being renamed (the original name)
+	renameInput    string // edit buffer for modeRename
+	renameInFlight bool
 
 	width, height int
 	status        string

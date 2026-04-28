@@ -20,6 +20,14 @@ import (
 	"github.com/ottercoders/soda/internal/tui"
 )
 
+// Build-time metadata, populated by goreleaser via -ldflags.
+// See .goreleaser.yaml for the injection config.
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 var (
 	flagConfigPath  string
 	flagWorkers     int
@@ -30,9 +38,10 @@ var (
 
 func main() {
 	root := &cobra.Command{
-		Use:   "soda",
-		Short: "Scan SSH hosts for active tmux sessions and reconnect with one keystroke.",
-		RunE:  runTUI,
+		Use:     "soda",
+		Short:   "Scan SSH hosts for active tmux sessions and reconnect with one keystroke.",
+		Version: fmt.Sprintf("%s (commit %s, built %s)", version, commit, date),
+		RunE:    runTUI,
 	}
 	root.PersistentFlags().StringVar(&flagConfigPath, "ssh-config", "", "path to ssh_config (default ~/.ssh/config)")
 	root.PersistentFlags().IntVar(&flagWorkers, "workers", 16, "max concurrent ssh scans")

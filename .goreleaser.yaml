@@ -1,0 +1,49 @@
+version: 2
+project_name: soda
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: soda
+    main: ./cmd/soda
+    binary: soda
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .ShortCommit }}
+      - -X main.date={{ .Date }}
+
+archives:
+  - id: soda
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    files:
+      - LICENSE*
+      - README*
+      - CHANGELOG*
+
+checksum:
+  name_template: 'checksums.txt'
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  # release-please owns CHANGELOG.md, so we don't need goreleaser to
+  # generate one in the release notes; let GitHub render the existing
+  # CHANGELOG section instead.
+  use: github-native
+
+release:
+  draft: false
+  prerelease: auto

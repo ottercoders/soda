@@ -1,0 +1,5 @@
+/soda
+*.test
+*.out
+.idea/
+.vscode/

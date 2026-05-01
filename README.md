@@ -22,8 +22,10 @@ soda hosts                    # print scannable hosts from ssh_config
 ```
 
 Hosts come from `~/.ssh/config`. Wildcard `Host` entries (`*`, `?`) are skipped.
-Optional excludes: `~/.config/soda/config.toml` with `excluded_hosts = ["..."]`
-(not implemented in v1 — open an issue if needed).
+The local machine (`localhost`) is always included as the first host so your
+local tmux sessions show up alongside remote ones; pass `--no-local` to omit
+it. Optional excludes: `~/.config/soda/config.toml` with
+`excluded_hosts = ["..."]` (not implemented in v1 — open an issue if needed).
 
 ## Releases
 

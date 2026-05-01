@@ -9,13 +9,23 @@ import (
 	"os/exec"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/ottercoders/soda/internal/hosts"
 )
 
-// Attach replaces the current process with `ssh -t <host> tmux attach -t <name>`.
-// Returns only on error — on success this function does not return.
+// Attach replaces the current process with `ssh -t <host> tmux attach -t <name>`,
+// or — when host is the local machine — directly with `tmux attach -t <name>`.
+// Returns only on error; on success this function does not return.
 func Attach(host, session string) error {
 	if host == "" {
 		return fmt.Errorf("attach: empty host")
+	}
+	if hosts.IsLocalhost(host) {
+		args := []string{"attach"}
+		if session != "" {
+			args = []string{"attach", "-t", session}
+		}
+		return execLocal("tmux", args...)
 	}
 	tmuxCmd := "tmux attach"
 	if session != "" {
@@ -24,7 +34,8 @@ func Attach(host, session string) error {
 	return execSSH(host, tmuxCmd)
 }
 
-// New replaces the current process with `ssh -t <host> tmux new -s <name>`.
+// New replaces the current process with `ssh -t <host> tmux new -A -s <name>`,
+// or — when host is the local machine — directly with `tmux new -A -s <name>`.
 // If name is empty, defaults to "main".
 func New(host, name string) error {
 	if host == "" {
@@ -33,7 +44,10 @@ func New(host, name string) error {
 	if name == "" {
 		name = "main"
 	}
-	// `new -A` attaches if the session already exists; harmless and friendlier.
+	if hosts.IsLocalhost(host) {
+		// `new -A` attaches if the session already exists; harmless and friendlier.
+		return execLocal("tmux", "new", "-A", "-s", name)
+	}
 	return execSSH(host, fmt.Sprintf("tmux new -A -s %s", shellQuote(name)))
 }
 
@@ -46,6 +60,20 @@ func execSSH(host, remoteCmd string) error {
 	// unix.Exec replaces this process; on success it does not return.
 	if err := unix.Exec(sshPath, argv, os.Environ()); err != nil {
 		return fmt.Errorf("exec ssh: %w", err)
+	}
+	return nil
+}
+
+// execLocal replaces the current process with the named program, looked up on
+// PATH. Used for direct local tmux attach/new without going through ssh.
+func execLocal(name string, args ...string) error {
+	bin, err := exec.LookPath(name)
+	if err != nil {
+		return fmt.Errorf("locate %s: %w", name, err)
+	}
+	argv := append([]string{bin}, args...)
+	if err := unix.Exec(bin, argv, os.Environ()); err != nil {
+		return fmt.Errorf("exec %s: %w", name, err)
 	}
 	return nil
 }

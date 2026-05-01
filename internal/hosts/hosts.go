@@ -12,12 +12,28 @@ import (
 	sshconfig "github.com/kevinburke/ssh_config"
 )
 
-// Host is a scannable SSH alias resolved from ssh_config.
+// Host is a scannable target — either an SSH alias resolved from ssh_config
+// or the synthetic local machine (see Localhost).
 type Host struct {
-	Alias    string // the name passed to `ssh <alias>`
+	Alias    string // the name passed to `ssh <alias>` (or the literal "localhost")
 	HostName string // resolved Hostname (informational)
 	User     string // resolved User    (informational)
 	Port     string // resolved Port    (informational, default "22")
+}
+
+// Localhost returns the synthetic Host that represents the local machine.
+// Scanning / attaching to it bypasses ssh and runs tmux directly.
+func Localhost() Host {
+	return Host{Alias: "localhost", HostName: "localhost", Port: "-"}
+}
+
+// IsLocalhost reports whether an alias names the local machine.
+func IsLocalhost(alias string) bool {
+	switch alias {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	}
+	return false
 }
 
 // Load reads ~/.ssh/config (and any Include files the library resolves) and

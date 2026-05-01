@@ -164,11 +164,29 @@ func Scan(ctx context.Context, hs []hosts.Host, runner Runner, concurrency int) 
 	return out
 }
 
-// runOneShot runs a single remote command via ssh on the named host using the
-// same BatchMode + short-timeout flags the scanner uses. Used for control-plane
-// operations like preview, rename, kill — anything where we want to do one
-// thing on the remote and parse the result, not stream output.
-func runOneShot(ctx context.Context, alias, remoteCmd string) (stdout string, err error) {
+// runLocalScan executes `tmux list-sessions -F <Format>` directly on the local
+// machine. Mirrors the contract of Runner.Run (stdout, stderr, exitCode, err)
+// so scanOne can branch transparently between local and remote.
+func runLocalScan(ctx context.Context) (string, string, int, error) {
+	cmd := exec.CommandContext(ctx, "tmux", "list-sessions", "-F", tmux.Format)
+	var stdout, stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	runErr := cmd.Run()
+	exitCode := 0
+	if runErr != nil {
+		var ee *exec.ExitError
+		if errors.As(runErr, &ee) {
+			exitCode = ee.ExitCode()
+			runErr = nil
+		}
+	}
+	return stdout.String(), stderr.String(), exitCode, runErr
+}
+
+// runRemoteOneShot runs a single remote command via ssh on the named host
+// using the same BatchMode + short-timeout flags the scanner uses.
+func runRemoteOneShot(ctx context.Context, alias, remoteCmd string) (stdout string, err error) {
 	args := []string{
 		"-o", "BatchMode=yes",
 		"-o", "ConnectTimeout=3",
@@ -176,14 +194,23 @@ func runOneShot(ctx context.Context, alias, remoteCmd string) (stdout string, er
 		alias,
 		remoteCmd,
 	}
-	cmd := exec.CommandContext(ctx, "ssh", args...)
+	return runAndCapture(exec.CommandContext(ctx, "ssh", args...), "ssh")
+}
+
+// runLocalOneShot runs a local command directly — used for the synthetic
+// localhost host so we don't loop ssh back through itself.
+func runLocalOneShot(ctx context.Context, name string, args ...string) (stdout string, err error) {
+	return runAndCapture(exec.CommandContext(ctx, name, args...), name)
+}
+
+func runAndCapture(cmd *exec.Cmd, label string) (string, error) {
 	var so, se strings.Builder
 	cmd.Stdout = &so
 	cmd.Stderr = &se
 	if runErr := cmd.Run(); runErr != nil {
 		var ee *exec.ExitError
 		if errors.As(runErr, &ee) {
-			return "", fmt.Errorf("ssh exit %d: %s", ee.ExitCode(), strings.TrimSpace(se.String()))
+			return "", fmt.Errorf("%s exit %d: %s", label, ee.ExitCode(), strings.TrimSpace(se.String()))
 		}
 		return "", runErr
 	}
@@ -196,10 +223,14 @@ func Preview(ctx context.Context, alias, session string) (string, error) {
 	if alias == "" || session == "" {
 		return "", errors.New("preview: empty alias or session")
 	}
-	return runOneShot(ctx, alias, "tmux capture-pane -p -J -t "+shellQuote(session))
+	if hosts.IsLocalhost(alias) {
+		return runLocalOneShot(ctx, "tmux", "capture-pane", "-p", "-J", "-t", session)
+	}
+	return runRemoteOneShot(ctx, alias, "tmux capture-pane -p -J -t "+shellQuote(session))
 }
 
-// RenameSession renames a tmux session on the remote host.
+// RenameSession renames a tmux session on the remote host (or locally when
+// alias is the synthetic localhost).
 func RenameSession(ctx context.Context, alias, oldName, newName string) error {
 	if alias == "" || oldName == "" || newName == "" {
 		return errors.New("rename: empty alias/old/new")
@@ -207,13 +238,24 @@ func RenameSession(ctx context.Context, alias, oldName, newName string) error {
 	if oldName == newName {
 		return nil
 	}
-	_, err := runOneShot(ctx, alias,
+	if hosts.IsLocalhost(alias) {
+		_, err := runLocalOneShot(ctx, "tmux", "rename-session", "-t", oldName, newName)
+		return err
+	}
+	_, err := runRemoteOneShot(ctx, alias,
 		"tmux rename-session -t "+shellQuote(oldName)+" "+shellQuote(newName))
 	return err
 }
 
 func scanOne(ctx context.Context, h hosts.Host, runner Runner) Result {
-	stdout, stderr, code, err := runner.Run(ctx, h.Alias)
+	var stdout, stderr string
+	var code int
+	var err error
+	if hosts.IsLocalhost(h.Alias) {
+		stdout, stderr, code, err = runLocalScan(ctx)
+	} else {
+		stdout, stderr, code, err = runner.Run(ctx, h.Alias)
+	}
 	if err != nil {
 		return Result{Host: h, State: StateUnreachable, Err: err}
 	}

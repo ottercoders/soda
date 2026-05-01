@@ -34,6 +34,7 @@ var (
 	flagListJSON    bool
 	flagNewName     string
 	flagScanTimeout time.Duration
+	flagNoLocal     bool
 )
 
 func main() {
@@ -46,6 +47,7 @@ func main() {
 	root.PersistentFlags().StringVar(&flagConfigPath, "ssh-config", "", "path to ssh_config (default ~/.ssh/config)")
 	root.PersistentFlags().IntVar(&flagWorkers, "workers", 16, "max concurrent ssh scans")
 	root.PersistentFlags().DurationVar(&flagScanTimeout, "timeout", 30*time.Second, "max time to wait for all scans to finish")
+	root.PersistentFlags().BoolVar(&flagNoLocal, "no-local", false, "do not include localhost in the scan")
 
 	listCmd := &cobra.Command{
 		Use:   "list",
@@ -88,8 +90,13 @@ func loadHosts() ([]hosts.Host, error) {
 	if err != nil {
 		return nil, err
 	}
+	if !flagNoLocal {
+		// Localhost goes first so it's the cursor's default position — most
+		// users want their local sessions surfaced before remote ones.
+		hs = append([]hosts.Host{hosts.Localhost()}, hs...)
+	}
 	if len(hs) == 0 {
-		return nil, fmt.Errorf("no scannable hosts in ssh_config")
+		return nil, fmt.Errorf("no scannable hosts (ssh_config empty and --no-local set)")
 	}
 	return hs, nil
 }
@@ -223,7 +230,7 @@ func runNew(_ *cobra.Command, args []string) error {
 }
 
 func runHosts(_ *cobra.Command, _ []string) error {
-	hs, err := hosts.Load(flagConfigPath)
+	hs, err := loadHosts()
 	if err != nil {
 		return err
 	}
